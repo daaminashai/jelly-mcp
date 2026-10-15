@@ -1,0 +1,36 @@
+{
+  "name": "jelly-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Model Context Protocol server for Jelly (letsjelly.com): reads through Marmalade and your Jelly login, acts through your Jelly login.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "jelly-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "setup": "npm run build && node dist/setup.js",
+    "cookie": "tsx src/cookie.ts",
+    "check": "tsx src/check.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "try": "npm run build --silent && tsx scripts/try.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "dotenv": "^18.0.8",
+    "node-html-parser": "^9.0.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}
