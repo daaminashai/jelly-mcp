@@ -15,6 +15,7 @@
     "start": "node dist/index.js",
     "setup": "tsc -p tsconfig.build.json && node dist/setup.js",
     "login": "tsc -p tsconfig.build.json && node dist/setup.js --login",
+    "service": "tsc -p tsconfig.build.json && node dist/service.js",
     "check": "tsx src/check.ts",
     "dev": "tsx src/index.ts",
     "try": "npm run build --silent && tsx scripts/try.ts",

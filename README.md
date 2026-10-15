@@ -27,6 +27,17 @@ Logged out of Jelly later? Run `npm run login`; no need to restart Claude.
 Claude asks before anything that changes Jelly, and drafts replies for you to send unless you ask it to send. In
 `.env`, `READ_ONLY=1` lets Claude only read, and `DRAFT_ONLY_NO_SEND=1` lets it draft but never send.
 
+## keep it running (optional, macOS)
+
+```bash
+npm run service
+```
+
+Runs jelly-mcp all the time in the background instead of Claude starting it each time: it starts when you log in,
+restarts by itself if it ever stops, and every Claude window shares it, so it's quicker. It only listens on your own
+computer and needs a secret token that's kept in `.env`. `npm run service -- --status` shows how it's doing, and
+`npm run service -- --uninstall` goes back to normal.
+
 ## how it works
 
 It runs on your computer with your own Jelly login and does what the Jelly website does, so it can only do what you
