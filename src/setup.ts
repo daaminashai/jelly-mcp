@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     if (args.includes("--login")) {
       const file = args.find((a) => !a.startsWith("--"));
       const me = await ensureJellyLogin(prompt, { force: true, from: file ? fs.readFileSync(file, "utf8") : undefined });
-      if (me) say("Restart Claude (or reconnect the jelly server) to use the new login.");
+      if (me) say("jelly-mcp picks up the new login by itself the next time Claude uses it. No restart needed.");
       process.exitCode = me ? 0 : 1;
       return;
     }

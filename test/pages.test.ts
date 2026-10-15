@@ -3,10 +3,12 @@ import {
   parseConversationList,
   parseConversationPage,
   parseFilterLinks,
+  parseDraftDiscard,
+  parseDraftPreview,
   parseMessageForm,
   parseSavedReplies,
 } from "../src/jelly/pages.js";
-import { composePage, conversationPage, listPage, replyDraftStream } from "./fixtures.js";
+import { composePage, conversationPage, draftEditor, draftPreview, listPage, replyDraftStream } from "./fixtures.js";
 
 const URL_ = "https://app.letsjelly.com/hack-club/conversations/help-with-venue";
 
@@ -18,6 +20,7 @@ describe("parseConversationPage", () => {
       archived: false,
       trashed: false,
       snoozed: false,
+      snoozedUntil: null,
       bookmarked: false,
       following: true,
       assignees: ["Pat Lee", "Sam Rivera"],
@@ -37,7 +40,7 @@ describe("parseConversationPage", () => {
 
   it("knows archived, bookmarked, snoozed and open drafts", () => {
     const page = parseConversationPage(conversationPage({ archived: true, bookmarked: true, snoozed: true, drafts: true }), URL_);
-    expect(page.state).toMatchObject({ archived: true, bookmarked: true, snoozed: true });
+    expect(page.state).toMatchObject({ archived: true, bookmarked: true, snoozed: true, snoozedUntil: "2026-10-16T09:00:00Z" });
     expect(page.drafts).toBeGreaterThan(0);
   });
 
@@ -54,6 +57,27 @@ describe("parseConversationPage", () => {
     expect(page.mentions).toEqual([
       { name: "Pat Lee", sgid: "sgid-pat" },
       { name: "Sam Rivera", sgid: "sgid-sam" },
+    ]);
+  });
+});
+
+describe("drafts", () => {
+  it("reads who started a draft from its preview", () => {
+    expect(parseDraftPreview(draftPreview({ startedBy: "Sam Rivera" }))).toEqual({
+      messageId: "msg-ccc",
+      claimAction: "/hack-club/drafts/msg-ccc/claim",
+      startedBy: "Sam Rivera",
+      text: "Old draft text",
+    });
+    expect(parseDraftPreview(draftPreview()).startedBy).toBeNull();
+  });
+  it("finds the editor's Discard link", () => {
+    expect(parseDraftDiscard(draftEditor())).toBe("/hack-club/messages/msg-ccc?discard=true&draft_lock_token=lock-2");
+    expect(parseDraftPreview(draftEditor())).toMatchObject({ messageId: "msg-ccc", claimAction: null, startedBy: null });
+  });
+  it("lists the draft frames on a conversation", () => {
+    expect(parseConversationPage(conversationPage({ drafts: true }), URL_).draftFrames).toEqual([
+      { frame: "message-form-x", src: "/hack-club/conversations/help-with-venue/messages/msg-ccc/edit" },
     ]);
   });
 });

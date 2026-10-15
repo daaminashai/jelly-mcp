@@ -15,14 +15,14 @@ npm run setup
 Setup shows you how to copy your Jelly login from Chrome, then adds jelly-mcp to Claude Code and Claude Desktop.
 Restart Claude and ask something like _"what's unassigned in Haven?"_ or _"draft a reply to the venue question"_.
 
-Logged out of Jelly later? Run `npm run login`.
+Logged out of Jelly later? Run `npm run login`; no need to restart Claude.
 
 ## what Claude can do
 
 - **read**: your inbox and every other view, search, whole threads with internal notes, labels, saved replies and
   the team
-- **act**: draft or send replies and new emails, add internal notes (with @mentions), archive, snooze, assign,
-  label, move between mailboxes, bookmark, mark read, trash
+- **act**: draft (and redo or discard drafts), send replies and new emails, add internal notes (with @mentions),
+  archive, snooze, assign, label, move between mailboxes, bookmark, mark read, trash
 
 Claude asks before anything that changes Jelly, and drafts replies for you to send unless you ask it to send. In
 `.env`, `READ_ONLY=1` lets Claude only read, and `DRAFT_ONLY_NO_SEND=1` lets it draft but never send.

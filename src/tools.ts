@@ -212,7 +212,8 @@ export function registerTools(server: McpServer, deps: Deps): void {
         if (deps.jelly) {
           try {
             const page = await deps.jelly.conversation(ref);
-            return formatConversation(page, deps.jelly.conversationUrl(page.slug), max_chars_per_item);
+            const drafts = page.draftFrames.length ? await deps.jelly.openDrafts(page).catch(() => undefined) : [];
+            return formatConversation(page, deps.jelly.conversationUrl(page.slug), max_chars_per_item, drafts);
           } catch (err) {
             if (!(err instanceof JellySessionError) || !deps.marmalade) throw err;
             jellyError = err;
@@ -304,6 +305,10 @@ export function registerTools(server: McpServer, deps: Deps): void {
     cc: addresses.optional().describe("Extra Cc addresses"),
     bcc: addresses.optional().describe("Extra Bcc addresses"),
     allow_open_drafts: z.boolean().default(false).describe("Go ahead even if a teammate has an unsent draft open in it"),
+    replace_my_draft: z
+      .boolean()
+      .default(false)
+      .describe("If you already have a draft in this conversation (e.g. one written earlier), discard it first. Teammates' drafts are never touched."),
   };
 
   server.registerTool(
@@ -326,6 +331,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
             cc: a.cc,
             bcc: a.bcc,
             allowOpenDrafts: a.allow_open_drafts,
+            replaceMyDraft: a.replace_my_draft,
           },
           "draft",
         );
@@ -358,6 +364,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
               bcc: a.bcc,
               archive: a.archive,
               allowOpenDrafts: a.allow_open_drafts,
+              replaceMyDraft: a.replace_my_draft,
             },
             "send",
           );
@@ -365,6 +372,25 @@ export function registerTools(server: McpServer, deps: Deps): void {
         }),
     );
   }
+
+  server.registerTool(
+    "discard_draft",
+    {
+      title: "Discard your draft",
+      description:
+        "Deletes your own unsent reply draft(s) in a conversation, as Jelly's Discard button does. There is no undo. Drafts a teammate started are never touched. To redo a draft, draft_reply with replace_my_draft does this for you.",
+      inputSchema: {
+        conversation,
+        draft_id: z.string().regex(/^msg-[\w-]+$/).optional().describe("Only this draft (msg-…); otherwise all of yours in the conversation"),
+      },
+      annotations: { ...WRITE, destructiveHint: true },
+    },
+    ({ conversation: ref, draft_id }) =>
+      run(async () => {
+        const { page, discarded } = await jelly.discardDrafts(ref, draft_id);
+        return `Discarded ${discarded.length === 1 ? "your draft" : `${discarded.length} of your drafts`} in ${jelly.conversationUrl(page.slug)}`;
+      }),
+  );
 
   const composeInput = {
     to: addresses.min(1).describe("Recipients"),
@@ -429,8 +455,18 @@ export function registerTools(server: McpServer, deps: Deps): void {
     },
     ({ conversation: ref, body: text }) =>
       run(async () => {
-        const page = await jelly.addNote(ref, text);
-        return `Note added: ${jelly.conversationUrl(page.slug)}`;
+        const { page, mentioned, notMentioned } = await jelly.addNote(ref, text);
+        const lines = [`Note added: ${jelly.conversationUrl(page.slug)}`];
+        if (mentioned.length) lines.push(`Mentioned (they'll be notified): ${mentioned.join(", ")}`);
+        if (notMentioned.length) {
+          const you = page.me?.name.toLowerCase();
+          lines.push(
+            `Left as plain text, not mentions: ${notMentioned
+              .map((n) => `@${n}${you && you.startsWith(n.toLowerCase()) ? " (that's you; Jelly doesn't let you mention yourself)" : ""}`)
+              .join(", ")}. Mentions need a teammate's full name as Jelly shows it.`,
+          );
+        }
+        return lines.join("\n");
       }),
   );
 

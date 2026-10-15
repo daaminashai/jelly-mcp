@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { JellyClient, JellySendError, JellySessionError } from "../src/jelly/client.js";
 import { conversationRef, Jelly, snoozeTime } from "../src/jelly/service.js";
 import { checkJellyLogin } from "../src/login.js";
-import { composePage, conversationPage, fakeJelly, listPage, redirect, replyDraftStream, type Call } from "./fixtures.js";
+import { composePage, conversationPage, draftEditor, draftPreview, fakeJelly, listPage, redirect, replyDraftStream, type Call } from "./fixtures.js";
 
 const CONV = "/hack-club/conversations/help-with-venue";
 
@@ -76,10 +76,57 @@ describe("reply", () => {
     expect(posts(calls)).toEqual([]);
   });
 
-  it("refuses while a teammate has a draft open", async () => {
-    const { jelly, calls } = jellyWith({ ...routes(), [`GET ${CONV}`]: () => conversationPage({ drafts: true }) });
-    await expect(jelly.reply("help-with-venue", { text: "Hi" }, "send")).rejects.toThrow(/unsent draft open/);
+  it("refuses while a teammate has a draft open, and never touches it", async () => {
+    const { jelly, calls } = jellyWith({
+      ...routes(),
+      [`GET ${CONV}`]: () => conversationPage({ drafts: true }),
+      [`GET ${CONV}/messages/msg-ccc/edit`]: () => draftPreview({ startedBy: "Sam Rivera" }),
+    });
+    await expect(jelly.reply("help-with-venue", { text: "Hi", replaceMyDraft: true }, "send")).rejects.toThrow(
+      /Sam Rivera has an unsent draft open/,
+    );
     expect(posts(calls)).toEqual([]);
+  });
+
+  it("asks before replacing your own draft", async () => {
+    const { jelly, calls } = jellyWith({
+      ...routes(),
+      [`GET ${CONV}`]: () => conversationPage({ drafts: true }),
+      [`GET ${CONV}/messages/msg-ccc/edit`]: () => draftPreview(),
+    });
+    await expect(jelly.reply("help-with-venue", { text: "Hi" }, "draft")).rejects.toThrow(
+      /you already have a draft in this conversation \("Old draft text"\). Pass replace_my_draft/,
+    );
+    expect(posts(calls)).toEqual([]);
+  });
+
+  it("replaces your own draft: Edit draft, Discard, then a fresh draft", async () => {
+    let claimed = false;
+    let discarded = false;
+    const { jelly, calls } = jellyWith({
+      ...routes(),
+      [`GET ${CONV}`]: () => conversationPage({ drafts: !discarded }),
+      [`GET ${CONV}/messages/msg-ccc/edit`]: () => (claimed ? draftEditor() : draftPreview()),
+      "POST /hack-club/drafts/msg-ccc/claim": () => {
+        claimed = true;
+        return redirect(`${CONV}/messages/msg-ccc/edit`);
+      },
+      "POST /hack-club/messages/msg-ccc": () => {
+        discarded = true;
+        return redirect(CONV, 303);
+      },
+    });
+    const { detail } = await jelly.reply("help-with-venue", { text: "Shorter text", replaceMyDraft: true }, "draft");
+    expect(posts(calls).map((c) => `${c.method} ${c.path}`)).toEqual([
+      "POST /hack-club/drafts/msg-ccc/claim",
+      "POST /hack-club/messages/msg-ccc?discard=true&draft_lock_token=lock-2",
+      expect.stringMatching(/^POST \/hack-club\/drafts\/reply\?/),
+      "PUT /hack-club/drafts/k1",
+      "POST /hack-club/drafts/k1/release",
+    ]);
+    expect(field(posts(calls)[1], "_method")).toEqual(["delete"]);
+    expect(posts(calls)[0]!.headers["turbo-frame"]).toBe("message-form-x");
+    expect(detail).toMatch(/earlier draft was discarded/);
   });
 
   it("saves a draft instead of sending, then lets go of the edit lock", async () => {
@@ -113,6 +160,35 @@ describe("reply", () => {
     const err = await jelly.reply("help-with-venue", { text: "Hi" }, "send").catch((e) => e);
     expect(err).toBeInstanceOf(JellySendError);
     expect(err.maybeSent).toBe(true);
+  });
+});
+
+describe("discardDrafts", () => {
+  const routes = (startedBy?: string) => {
+    let claimed = false;
+    return {
+      [`GET ${CONV}`]: () => conversationPage({ drafts: true }),
+      [`GET ${CONV}/messages/msg-ccc/edit`]: () => (claimed ? draftEditor() : draftPreview({ startedBy })),
+      "POST /hack-club/drafts/msg-ccc/claim": () => {
+        claimed = true;
+        return redirect(`${CONV}/messages/msg-ccc/edit`);
+      },
+      "POST /hack-club/messages/msg-ccc": () => redirect(CONV, 303),
+    };
+  };
+
+  it("discards your own draft", async () => {
+    const { jelly, calls } = jellyWith(routes());
+    const { discarded } = await jelly.discardDrafts("help-with-venue");
+    expect(discarded.map((d) => d.messageId)).toEqual(["msg-ccc"]);
+    expect(posts(calls).at(-1)!.path).toBe("/hack-club/messages/msg-ccc?discard=true&draft_lock_token=lock-2");
+  });
+
+  it("won't discard a teammate's draft", async () => {
+    const { jelly, calls } = jellyWith(routes("Sam Rivera"));
+    await expect(jelly.discardDrafts("help-with-venue")).rejects.toThrow(/no draft in this conversation \(Sam Rivera do\)/);
+    await expect(jelly.discardDrafts("help-with-venue", "msg-ccc")).rejects.toThrow(/started by Sam Rivera/);
+    expect(posts(calls)).toEqual([]);
   });
 });
 
@@ -166,6 +242,13 @@ describe("notes", () => {
       '<div><action-text-attachment sgid="sgid-sam" content-type="application/octet-stream"><span class="note-mention">Sam Rivera</span></action-text-attachment> can you call them? cc <action-text-attachment sgid="sgid-pat" content-type="application/octet-stream"><span class="note-mention">Pat Lee</span></action-text-attachment></div>',
     ]);
     expect(field(note, "note[attachments][]")).toEqual([]);
+  });
+
+  it("says which @names didn't become mentions", async () => {
+    const { jelly } = jellyWith({ [`GET ${CONV}`]: () => conversationPage(), [`POST ${CONV}/notes`]: () => redirect(CONV) });
+    const out = await jelly.addNote("help-with-venue", "@Sam Rivera and @Jordan Blake, mail team@example.org");
+    expect(out.mentioned).toEqual(["Sam Rivera"]);
+    expect(out.notMentioned).toEqual(["Jordan Blake"]);
   });
 });
 
@@ -230,6 +313,14 @@ describe("update", () => {
     expect(field(sent[8], "_method")).toEqual([]);
   });
 
+  it("assigns you with your own I got this button", async () => {
+    const { jelly, calls } = jellyWith({ ...routes, [`GET ${CONV}`]: () => conversationPage({ unassigned: true }) });
+    expect((await jelly.update("help-with-venue", { assign: ["me"] })).results).toEqual(["assigned Pat Lee"]);
+    // Your first name finds you too, though two of your buttons match it.
+    expect((await jelly.update("help-with-venue", { assign: ["pat"] })).results).toEqual(["assigned Pat Lee"]);
+    expect(posts(calls)[0]!.path).toBe(`${CONV}/assignments?assignee_id=21`);
+  });
+
   it("says when there is nothing to do instead of guessing", async () => {
     const { jelly, calls } = jellyWith(routes);
     const { results } = await jelly.update("help-with-venue", {
@@ -245,6 +336,14 @@ describe("update", () => {
       "wasn't archived",
     ]);
     expect(posts(calls)).toEqual([]);
+  });
+
+  it("wakes a snoozed conversation with its Unsnooze button", async () => {
+    const { jelly, calls } = jellyWith({ ...routes, [`GET ${CONV}`]: () => conversationPage({ snoozed: true }), [`POST ${CONV}/unsnooze`]: ok });
+    expect((await jelly.update("help-with-venue", { snooze: null })).results).toEqual(["unsnoozed (back in the inbox)"]);
+    expect(posts(calls).map((c) => c.path)).toEqual([`${CONV}/unsnooze`]);
+    const { jelly: awake } = jellyWith(routes);
+    expect((await awake.update("help-with-venue", { snooze: null })).results).toEqual(["wasn't snoozed"]);
   });
 
   it("snoozes until a time, as the snooze menu does", async () => {
@@ -265,6 +364,36 @@ describe("lists", () => {
 });
 
 describe("session handling", () => {
+  it("picks up a login saved by npm run login, without a restart", async () => {
+    const fake = fakeJelly({
+      [`GET ${CONV}`]: (call) =>
+        call.headers.cookie?.includes("current_user_session_token=new") ? conversationPage() : redirect("https://app.letsjelly.com/login"),
+      [`POST ${CONV}/archive`]: (call) =>
+        call.headers.cookie?.includes("current_user_session_token=newer") ? redirect(CONV) : redirect("https://app.letsjelly.com/login"),
+    });
+    let saved = "current_user_session_token=old";
+    const client = new JellyClient({
+      baseUrl: "https://app.letsjelly.com",
+      team: "hack-club",
+      cookie: "current_user_session_token=old",
+      timezone: "UTC",
+      reloadCookie: () => saved,
+      fetch: fake.fetch,
+    });
+    const jelly = new Jelly(client);
+    // Nothing newer saved: the logged-out error comes through.
+    await expect(jelly.conversation("help-with-venue")).rejects.toBeInstanceOf(JellySessionError);
+    // After npm run login: the read is retried once with the new login.
+    saved = "current_user_session_token=new";
+    expect((await jelly.conversation("help-with-venue")).slug).toBe("help-with-venue");
+    // A change is never retried, even when an even newer login turns up.
+    saved = "current_user_session_token=newer";
+    const before = fake.calls.filter((c) => c.method === "POST").length;
+    await expect(jelly.update("help-with-venue", { archive: true })).rejects.toThrow(/nothing was changed/);
+    expect(fake.calls.filter((c) => c.method === "POST").length).toBe(before + 1);
+  });
+
+
   it("reports a dead login clearly", async () => {
     const { jelly } = jellyWith({ [`GET ${CONV}`]: () => redirect("https://app.letsjelly.com/login") });
     await expect(jelly.conversation("help-with-venue")).rejects.toBeInstanceOf(JellySessionError);
