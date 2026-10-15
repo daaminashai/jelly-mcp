@@ -29,17 +29,17 @@ const EnvSchema = z.object({
   // The mailbox list_mailbox_conversations uses when none is given, e.g. "haven".
   MARMALADE_MAILBOX: optionalString,
 
-  // 1 hides every tool that changes anything in Jelly.
-  JELLY_READ_ONLY: flag(false),
-  // 0 keeps drafting but hides the tools that send email.
-  JELLY_ALLOW_SEND: flag(true),
+  // 1: Claude can only read; every tool that changes Jelly is hidden.
+  READ_ONLY: flag(false),
+  // 1: Claude can draft replies and emails but not send them.
+  DRAFT_ONLY_NO_SEND: flag(false),
 });
 
 export interface Config {
   jelly: { baseUrl: string; team: string; timezone: string; cookie?: string };
   marmalade?: { baseUrl: string; apiKey: string; defaultMailbox?: string };
   readOnly: boolean;
-  allowSend: boolean;
+  draftOnly: boolean;
 }
 
 export class ConfigError extends Error {}
@@ -66,8 +66,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     marmalade: e.MARMALADE_API_KEY
       ? { baseUrl: e.MARMALADE_BASE_URL, apiKey: e.MARMALADE_API_KEY, defaultMailbox: e.MARMALADE_MAILBOX }
       : undefined,
-    readOnly: e.JELLY_READ_ONLY,
-    allowSend: e.JELLY_ALLOW_SEND,
+    readOnly: e.READ_ONLY,
+    draftOnly: e.DRAFT_ONLY_NO_SEND,
   };
 }
 

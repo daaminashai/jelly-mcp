@@ -24,8 +24,8 @@ Logged out of Jelly later? Run `npm run login`.
 - **act**: draft or send replies and new emails, add internal notes (with @mentions), archive, snooze, assign,
   label, move between mailboxes, bookmark, mark read, trash
 
-Claude asks before anything that changes Jelly, and drafts replies for you to send unless you ask it to send. To keep
-it read-only, put `JELLY_READ_ONLY=1` in `.env`; to allow drafts but no sending, `JELLY_ALLOW_SEND=0`.
+Claude asks before anything that changes Jelly, and drafts replies for you to send unless you ask it to send. In
+`.env`, `READ_ONLY=1` lets Claude only read, and `DRAFT_ONLY_NO_SEND=1` lets it draft but never send.
 
 ## how it works
 

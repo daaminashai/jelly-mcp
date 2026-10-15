@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   registerTools(server, { config, jelly, marmalade });
   await server.connect(new StdioServerTransport());
   process.stderr.write(
-    `jelly-mcp ready (Jelly ${jelly ? "connected" : "off"}, Marmalade ${marmalade ? "connected" : "off"}${config.readOnly ? ", read-only" : ""})\n`,
+    `jelly-mcp ready (Jelly ${jelly ? "connected" : "off"}, Marmalade ${marmalade ? "connected" : "off"}${config.readOnly ? ", read only" : config.draftOnly ? ", drafts only" : ""})\n`,
   );
 }
 
