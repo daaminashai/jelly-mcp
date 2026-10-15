@@ -42,7 +42,7 @@ export async function runChecks(): Promise<{ ok: boolean; lines: string[] }> {
     }
   } else lines.push("- Marmalade: no MARMALADE_API_KEY (optional: adds date/status queries and the team list).");
 
-  lines.push(config.readOnly ? "- Read-only mode is on." : config.allowSend ? "- Sending is on." : "- Drafts only (sending is off).");
+  lines.push(config.readOnly ? "- READ_ONLY is on: Claude can only read." : config.draftOnly ? "- DRAFT_ONLY_NO_SEND is on: Claude can draft but not send." : "- Claude can read, draft and send.");
   return { ok, lines };
 }
 

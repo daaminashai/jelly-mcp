@@ -80,7 +80,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
           }
         } else lines.push("Marmalade: not configured (MARMALADE_API_KEY)");
         lines.push(
-          `Mode: ${config.readOnly ? "read-only (JELLY_READ_ONLY=1)" : config.allowSend ? "read, draft and send" : "read and draft (sending off: JELLY_ALLOW_SEND=0)"}`,
+          `Mode: ${config.readOnly ? "read only (READ_ONLY=1)" : config.draftOnly ? "read and draft, no sending (DRAFT_ONLY_NO_SEND=1)" : "read, draft and send"}`,
         );
         return lines.join("\n");
       }),
@@ -333,7 +333,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
       }),
   );
 
-  if (config.allowSend) {
+  if (!config.draftOnly) {
     server.registerTool(
       "send_reply",
       {
@@ -393,7 +393,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
       ),
   );
 
-  if (config.allowSend) {
+  if (!config.draftOnly) {
     server.registerTool(
       "send_email",
       {

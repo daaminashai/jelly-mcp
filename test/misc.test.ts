@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { loadConfig } from "../src/config.js";
 import { cookieHeaderFrom } from "../src/login.js";
 import { stripQuoted } from "../src/format.js";
 import { composeHtmlBody, htmlToText, textToHtml } from "../src/html.js";
@@ -43,5 +44,17 @@ describe("redact", () => {
   it("hides registered secrets and anything shaped like one", () => {
     registerSecret("tok123secret");
     expect(redact("cookie: tok123secret and Bearer mrmld_abcdef and x tok123secret")).not.toMatch(/tok123secret|mrmld_abcdef/);
+  });
+});
+
+describe("safety switches", () => {
+  const base = { JELLY_SESSION_COOKIE: "current_user_session_token=x" };
+  it("are both off unless set to 1", () => {
+    expect(loadConfig(base)).toMatchObject({ readOnly: false, draftOnly: false });
+    expect(loadConfig({ ...base, READ_ONLY: "0", DRAFT_ONLY_NO_SEND: "0" })).toMatchObject({ readOnly: false, draftOnly: false });
+  });
+  it("turn on with 1 or true", () => {
+    expect(loadConfig({ ...base, READ_ONLY: "1" })).toMatchObject({ readOnly: true, draftOnly: false });
+    expect(loadConfig({ ...base, DRAFT_ONLY_NO_SEND: "true" })).toMatchObject({ readOnly: false, draftOnly: true });
   });
 });
