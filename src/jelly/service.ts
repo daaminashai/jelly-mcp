@@ -9,6 +9,8 @@ import {
   fieldValue,
   parseConversationList,
   parseConversationPage,
+  parseDraftDiscard,
+  parseDraftPreview,
   parseHtml,
   parseIdentity,
   parseFilterLinks,
@@ -60,8 +62,20 @@ export interface ReplyOptions {
   bcc?: string[];
   /** Archive after sending. Left out, Jelly's own default for the reply box applies. */
   archive?: boolean;
-  /** Send even if someone has an unsent draft open in the conversation. */
+  /** Go ahead even if a teammate has an unsent draft open in the conversation. */
   allowOpenDrafts?: boolean;
+  /** Discard your own open draft(s) in the conversation first, e.g. to redo one Claude wrote. */
+  replaceMyDraft?: boolean;
+}
+
+export interface OpenDraft {
+  messageId: string | null;
+  mine: boolean;
+  startedBy: string | null;
+  text: string;
+  frame: string;
+  src: string;
+  claimAction: string | null;
 }
 
 export interface ComposeOptions {
@@ -210,7 +224,7 @@ export class Jelly {
 
   /** Opens a reply draft in Jelly (with signature and quote filled in) and either sends it or leaves it saved. */
   async reply(input: string, o: ReplyOptions, mode: "send" | "draft"): Promise<{ page: ConversationPage; detail: string }> {
-    const page = await this.conversation(input);
+    let page = await this.conversation(input);
     const latest = page.timeline.filter((t) => t.kind === "message").at(-1);
     if (o.expectLatest && latest?.messageId !== o.expectLatest) {
       throw new JellySendError(
@@ -218,7 +232,34 @@ export class Jelly {
         false,
       );
     }
-    if (page.drafts > 0 && !o.allowOpenDrafts) {
+    let replaced = 0;
+    if (page.draftFrames.length > 0) {
+      const drafts = await this.openDrafts(page);
+      const others = drafts.filter((d) => !d.mine);
+      const mine = drafts.filter((d) => d.mine);
+      const nothing = `Nothing ${mode === "send" ? "sent" : "saved"}`;
+      if (others.length && !o.allowOpenDrafts) {
+        throw new JellySendError(
+          `${nothing}: ${others.map((d) => d.startedBy).join(", ")} has an unsent draft open in this conversation. Check it in Jelly, or pass allow_open_drafts.`,
+          false,
+        );
+      }
+      if (mine.length && !o.replaceMyDraft && !o.allowOpenDrafts) {
+        throw new JellySendError(
+          `${nothing}: you already have a draft in this conversation ("${clipText(mine[0]!.text)}"). Pass replace_my_draft to replace it, or use discard_draft.`,
+          false,
+        );
+      }
+      if (mine.length && o.replaceMyDraft) {
+        for (const draft of mine) await this.discard(page, draft);
+        replaced = mine.length;
+        page = await this.conversation(page.slug);
+        if (page.draftFrames.length > others.length) {
+          throw new JellySendError(`${nothing}: your earlier draft is still there after discarding it. Check it in Jelly.`, false);
+        }
+      }
+    }
+    if (page.drafts > 0 && page.draftFrames.length === 0 && !o.allowOpenDrafts) {
       throw new JellySendError(
         `Nothing ${mode === "send" ? "sent" : "saved"}: someone has an unsent draft open in this conversation. Check it in Jelly, or pass allow_open_drafts.`,
         false,
@@ -247,7 +288,8 @@ export class Jelly {
 
     if (mode === "draft") {
       const released = await this.saveDraft(form, fields, page.csrfToken, referer);
-      return { page, detail: `Reply saved as a draft in Jelly for review: ${this.conversationUrl(page.slug)}${released ? "" : LOCK_NOTE}` };
+      const what = replaced ? "Your earlier draft was discarded and the new reply saved as a draft" : "Reply saved as a draft";
+      return { page, detail: `${what} in Jelly for review: ${this.conversationUrl(page.slug)}${released ? "" : LOCK_NOTE}` };
     }
 
     if (o.archive === true) setField(fields, "archive_conversation", "true");
@@ -257,7 +299,8 @@ export class Jelly {
     setField(fields, "button", "");
     await this.client.submit(form.action, fields, { csrf: page.csrfToken, frame: target.frame, referer, sends: true });
     const archived = fields.some(([n, v]) => n === "archive_conversation" && v === "true");
-    return { page, detail: `Reply sent${archived ? " and the conversation archived" : ""}: ${this.conversationUrl(page.slug)}` };
+    const discarded = replaced ? ` (your earlier draft was discarded first)` : "";
+    return { page, detail: `Reply sent${archived ? " and the conversation archived" : ""}${discarded}: ${this.conversationUrl(page.slug)}` };
   }
 
   async compose(o: ComposeOptions, mode: "send" | "draft"): Promise<string> {
@@ -315,30 +358,78 @@ export class Jelly {
     }
   }
 
+  // ---------- drafts ----------
+
+  /** The reply drafts open in a conversation, and whether each is yours. Reading them takes no lock. */
+  async openDrafts(page: ConversationPage): Promise<OpenDraft[]> {
+    const me = page.me?.name;
+    const drafts: OpenDraft[] = [];
+    for (const { frame, src } of page.draftFrames) {
+      const { body } = await this.client.get(src);
+      const preview = parseDraftPreview(body);
+      // No "Edit draft" button means you're already editing it, so it's yours.
+      const mine = preview.startedBy === null || (me !== undefined && preview.startedBy.toLowerCase() === me.toLowerCase());
+      drafts.push({ ...preview, mine, frame, src });
+    }
+    return drafts;
+  }
+
+  /** Discards your own reply drafts in a conversation (all of them, or the one with this msg-… id). */
+  async discardDrafts(input: string, messageId?: string): Promise<{ page: ConversationPage; discarded: OpenDraft[] }> {
+    const page = await this.conversation(input);
+    const drafts = await this.openDrafts(page);
+    const targets = messageId ? drafts.filter((d) => d.messageId === messageId) : drafts.filter((d) => d.mine);
+    if (messageId && targets.length === 0) throw new JellyError(`No open draft ${messageId} in this conversation`);
+    const theirs = targets.find((d) => !d.mine);
+    if (theirs) throw new JellyError(`That draft was started by ${theirs.startedBy}; only they can discard it`);
+    if (targets.length === 0) {
+      const others = drafts.filter((d) => !d.mine).map((d) => d.startedBy);
+      throw new JellyError(`You have no draft in this conversation${others.length ? ` (${others.join(", ")} do)` : ""}`);
+    }
+    for (const draft of targets) await this.discard(page, draft);
+    return { page, discarded: targets };
+  }
+
+  /** Presses "Edit draft" (taking the edit lock), then the editor's Discard link, as the browser does. */
+  private async discard(page: ConversationPage, draft: OpenDraft): Promise<void> {
+    const referer = this.client.conversationPath(page.slug);
+    if (draft.claimAction) {
+      await this.client.submit(draft.claimAction, [], { csrf: page.csrfToken, frame: draft.frame, referer });
+    }
+    const { body } = await this.client.get(draft.src);
+    const href = parseDraftDiscard(body);
+    if (!href) throw new JellyError("Jelly didn't offer a Discard button for that draft; it may be open elsewhere");
+    await this.client.submit(href, [["_method", "delete"]], { csrf: page.csrfToken, frame: `conversation_${page.id}`, referer });
+  }
+
   // ---------- notes ----------
 
   /** An internal comment only the team sees. "@Name" mentions a teammate, as typing @ in Jelly does. */
-  async addNote(input: string, text: string): Promise<ConversationPage> {
+  async addNote(
+    input: string,
+    text: string,
+  ): Promise<{ page: ConversationPage; mentioned: string[]; notMentioned: string[] }> {
     const page = await this.conversation(input);
     const form = this.pageForm(page, (f, tail) => tail === "/notes" && f.method === "post");
     if (!form) throw new JellyError("This conversation has no comment box in Jelly");
     const mentions = [...page.mentions].sort((a, b) => b.name.length - a.name.length);
+    const mentioned = new Set<string>();
     const html = textToHtml(text, (escaped) => {
       if (!escaped.includes("@")) return escaped;
       let out = escaped;
       for (const m of mentions) {
         const re = new RegExp(`@${escapeRegExp(escapeHtml(m.name))}(?![\\w])`, "gi");
-        out = out.replace(
-          re,
-          `<action-text-attachment sgid="${escapeHtml(m.sgid)}" content-type="application/octet-stream"><span class="note-mention">${escapeHtml(m.name)}</span></action-text-attachment>`,
-        );
+        out = out.replace(re, () => {
+          mentioned.add(m.name);
+          return `<action-text-attachment sgid="${escapeHtml(m.sgid)}" content-type="application/octet-stream"><span class="note-mention">${escapeHtml(m.name)}</span></action-text-attachment>`;
+        });
       }
       return out;
     });
     const fields = form.fields.filter(([n]) => n !== "note[attachments][]");
     setField(fields, "note[body]", html);
     await this.client.submit(form.action, fields, { csrf: page.csrfToken, referer: this.client.conversationPath(page.slug) });
-    return page;
+    return { page, mentioned: [...mentioned], notMentioned: unmatchedMentions(text, [...mentioned]) };
   }
 
   // ---------- state changes ----------
@@ -485,7 +576,13 @@ export class Jelly {
 
     if (changes.snooze !== undefined) {
       if (changes.snooze === null) {
-        await toggle(/^\/snooze$/, false, ["", "woken up (snooze removed)"], ["", "wasn't snoozed"]);
+        // Snoozed conversations get an Unsnooze button that brings them back to the inbox.
+        const form = find((f, tail) => tail === "/unsnooze" || (tail === "/snooze" && f.method === "delete"));
+        if (!form) results.push("wasn't snoozed");
+        else {
+          await submit(form);
+          results.push("unsnoozed (back in the inbox)");
+        }
       } else {
         const until = snoozeTime(changes.snooze);
         const form = find((f, tail) => tail === "/snooze" && f.method === "post");
@@ -610,7 +707,8 @@ function matchNamed<T>(items: T[], wanted: string, nameOf: (item: T) => string, 
     const name = nameOf(i).toLowerCase();
     return name.startsWith(target.toLowerCase()) || name.split(/\s+/).includes(target.toLowerCase());
   });
-  return loose.length === 1 ? loose[0] : undefined;
+  // Jelly often has several buttons for the same person or label; only different names are ambiguous.
+  return new Set(loose.map((i) => nameOf(i).toLowerCase())).size === 1 ? loose[0] : undefined;
 }
 
 function same(a: string, b: string): boolean {
@@ -619,6 +717,16 @@ function same(a: string, b: string): boolean {
 
 function warning(form: PageForm): string {
   return form.confirm ? ` (Jelly's note: ${form.confirm})` : "";
+}
+
+/** "@Some Name" in the text that didn't become a mention (not an email address). */
+function unmatchedMentions(text: string, mentioned: string[]): string[] {
+  const found = [...text.matchAll(/(?<![\w.])@(\p{Lu}[\p{L}'.-]*(?: \p{Lu}[\p{L}'.-]*)?)/gu)].map((m) => m[1]!);
+  return [...new Set(found)].filter((name) => !mentioned.some((m) => m.toLowerCase().startsWith(name.toLowerCase())));
+}
+
+function clipText(text: string, max = 60): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 function escapeRegExp(text: string): string {

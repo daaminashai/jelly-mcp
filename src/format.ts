@@ -2,6 +2,7 @@
 // id it needs for the next call on every line.
 import { htmlToText } from "./html.js";
 import type { ConversationList, ConversationPage, ConversationRow } from "./jelly/pages.js";
+import type { OpenDraft } from "./jelly/service.js";
 import type { ConversationDetail, ConversationSummary } from "./marmalade.js";
 
 export function formatList(title: string, list: ConversationList): string {
@@ -47,18 +48,31 @@ function formatRow(row: ConversationRow): string {
   return `${head}${row.preview ? `\n  > ${row.preview.length > 160 ? `${row.preview.slice(0, 160)}…` : row.preview}` : ""}`;
 }
 
-export function formatConversation(page: ConversationPage, url: string, maxCharsPerItem: number): string {
+export function formatConversation(page: ConversationPage, url: string, maxCharsPerItem: number, drafts?: OpenDraft[]): string {
   const s = page.state;
-  const status = s.trashed ? "in trash" : s.archived ? "archived" : s.archived === false ? "open (in the inbox)" : "unknown";
+  const status = s.trashed
+    ? "in trash"
+    : s.snoozed
+      ? `snoozed${s.snoozedUntil ? ` until ${s.snoozedUntil}` : ""} (out of the inbox until then)`
+      : s.archived
+        ? "archived"
+        : s.archived === false
+          ? "open (in the inbox)"
+          : "unknown";
   const latest = page.timeline.filter((t) => t.kind === "message").at(-1);
   const lines = [
     `# ${page.subject}`,
     `Link: ${url}`,
     `Slug: ${page.slug} · Jelly id ${page.id}`,
-    `Status: ${[status, s.snoozed ? "snoozed" : null, s.following ? "you follow it" : null, s.bookmarked ? "bookmarked" : null].filter(Boolean).join(" · ")}`,
+    `Status: ${[status, s.following ? "you follow it" : null, s.bookmarked ? "bookmarked" : null].filter(Boolean).join(" · ")}`,
     `Mailboxes: ${s.mailboxes.join(", ") || "?"} · Labels: ${s.labels.join(", ") || "none"} · Assigned: ${s.assignees.join(", ") || "nobody"}`,
-    `Latest message: ${latest?.messageId ?? "?"}${page.drafts ? ` · ${page.drafts} unsent draft(s) open` : ""}`,
+    `Latest message: ${latest?.messageId ?? "?"}`,
   ];
+  for (const d of drafts ?? []) {
+    const who = d.mine ? "Your draft" : `Draft started by ${d.startedBy}`;
+    lines.push(`${who}${d.messageId ? ` (${d.messageId})` : ""}, not sent yet: "${d.text.length > 300 ? `${d.text.slice(0, 300)}…` : d.text}"`);
+  }
+  if (page.drafts && !drafts?.length) lines.push(`${page.drafts} unsent draft(s) open`);
   if (page.options.assignable.length) lines.push(`Can also assign: ${page.options.assignable.map((a) => a.name).join(", ")}`);
   page.timeline.forEach((item, i) => {
     const heading =

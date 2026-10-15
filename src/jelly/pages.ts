@@ -151,6 +151,8 @@ export interface ConversationPage {
     archived: boolean | null;
     trashed: boolean;
     snoozed: boolean;
+    /** When a snoozed conversation comes back to the inbox. */
+    snoozedUntil: string | null;
     bookmarked: boolean | null;
     following: boolean | null;
     assignees: string[];
@@ -168,6 +170,8 @@ export interface ConversationPage {
   messageReplies: Map<string, { action: string; frame: string }>;
   /** Unsent drafts open in the conversation. */
   drafts: number;
+  /** Each open reply draft's frame: it loads a preview with an "Edit draft" button. */
+  draftFrames: Array<{ frame: string; src: string }>;
   /** People who can be @mentioned in a note, with the token Jelly's editor inserts. */
   mentions: Array<{ name: string; sgid: string }>;
   me: Identity | null;
@@ -210,10 +214,11 @@ export function parseConversationPage(html: string, finalUrl: string): Conversat
   );
   for (const f of formsAt(/^\/assignments$/)) {
     const assigneeId = fieldValue(f, "assignee_id");
-    if (!assigneeId) continue;
-    const match = /assign (?:this conversation )?to (.+)$/i.exec(f.label);
-    const who = match?.[1] ?? f.label;
-    if (who && !named.has(assigneeId)) named.set(assigneeId, /^(yourself|me)$/i.test(who) ? (me?.name ?? who) : who);
+    if (!assigneeId || named.has(assigneeId)) continue;
+    // Your own button reads "I got this" / "Assign to yourself"; teammates' read "Assign to <name>".
+    const self = /^i got this$/i.test(f.label) || /\byourself\b/i.test(f.label);
+    const who = self ? (me?.name ?? "you") : (/assign (?:this conversation )?to (.+)$/i.exec(f.label)?.[1] ?? f.label);
+    named.set(assigneeId, who);
   }
 
   const labelOptions = new Map<string, string>();
@@ -297,7 +302,13 @@ export function parseConversationPage(html: string, finalUrl: string): Conversat
     state: {
       archived: archiveForms.length ? archiveForms.some((f) => f.method === "delete") : null,
       trashed: formsAt(/^\/trash$/).some((f) => f.method === "delete"),
-      snoozed: formsAt(/^\/snooze$/).some((f) => f.method === "delete"),
+      snoozed: formsAt(/^\/unsnooze$/).length > 0 || formsAt(/^\/snooze$/).some((f) => f.method === "delete"),
+      // The "Conversation snoozed until …" banner (not the "snoozed this until" lines in the history).
+      snoozedUntil:
+        root
+          .querySelectorAll("time[datetime]")
+          .find((t) => !t.closest(".ti-activity") && /snoozed until/i.test(t.parentNode?.text ?? ""))
+          ?.getAttribute("datetime") ?? null,
       bookmarked: toggle(/^\/bookmarks?(\/\d+)?$/),
       following: formsAt(/^\/unsubscribe$/).length > 0 ? true : formsAt(/^\/subscribe$/).length > 0 ? false : null,
       assignees,
@@ -312,6 +323,10 @@ export function parseConversationPage(html: string, finalUrl: string): Conversat
     reply: responderAction && responderFrame && latestId ? { action: responderAction, frame: responderFrame, latestId } : null,
     messageReplies,
     drafts: countDrafts(root),
+    draftFrames: root
+      .querySelectorAll("turbo-frame[src]")
+      .filter((f) => /\/messages\/[^/]+\/edit(\?|$)/.test(f.getAttribute("src") ?? ""))
+      .map((f) => ({ frame: f.getAttribute("id") ?? "", src: f.getAttribute("src")! })),
     mentions: uniqueBy(mentions, (m) => m.sgid),
     me,
   };
@@ -332,6 +347,46 @@ function countDrafts(root: HTMLElement): number {
     if (/(^|[\s_-])draft($|[\s_-])/i.test(cls) || /^draft[_-]/i.test(id)) n++;
   }
   return n;
+}
+
+// ---------- drafts ----------
+
+export interface DraftPreview {
+  /** The draft's message id, msg-…; null if the page didn't say. */
+  messageId: string | null;
+  /** The "Edit draft" button, which takes the draft's edit lock. Null when you already hold it. */
+  claimAction: string | null;
+  /** Who started it ("Draft · started by Sana Deghat"); null means you did. */
+  startedBy: string | null;
+  /** The text of the draft, without signature or quote. */
+  text: string;
+}
+
+/** A draft's frame as Jelly shows it to someone not editing it: a preview and "Edit draft". */
+export function parseDraftPreview(html: string): DraftPreview {
+  const root = parseHtml(html);
+  const claimAction = root.querySelector('form[action$="/claim"]')?.getAttribute("action") ?? null;
+  const provenance = squish(root.querySelector(".draft-provenance")?.text ?? "");
+  const body = root.querySelector(".draft-locked-body");
+  body?.querySelectorAll(".jelly-signature, .jelly-quote, blockquote").forEach((el) => el.remove());
+  const discard = parseDraftDiscard(html);
+  const messageId =
+    /\/drafts\/(msg-[^/]+)\/claim/.exec(claimAction ?? "")?.[1] ?? /\/messages\/(msg-[^/?]+)/.exec(discard ?? "")?.[1] ?? null;
+  return {
+    messageId,
+    claimAction,
+    startedBy: /started by (.+)$/i.exec(provenance)?.[1]?.trim() ?? null,
+    text: body ? squish(body.text) : "",
+  };
+}
+
+/** The editor's Discard link (DELETE /messages/msg-…?discard=true&draft_lock_token=…), once you hold the draft. */
+export function parseDraftDiscard(html: string): string | null {
+  const root = parseHtml(html);
+  const link = root
+    .querySelectorAll('a[data-turbo-method="delete"][href]')
+    .find((a) => /\/messages\/msg-[^?]+\?(.*&)?discard=true/.test(a.getAttribute("href")!));
+  return link?.getAttribute("href") ?? null;
 }
 
 // ---------- reply / compose forms ----------

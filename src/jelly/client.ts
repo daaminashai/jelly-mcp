@@ -16,7 +16,9 @@ export class JellyError extends Error {
 /** The login is dead (logged out, expired, or rejected). */
 export class JellySessionError extends JellyError {
   constructor(message: string) {
-    super(`${message}. Your Jelly login has expired or was rejected: run \`npm run login\` in the jelly-mcp folder to reconnect.`);
+    super(
+      `${message}. Your Jelly login has expired or was rejected: run \`npm run login\` in the jelly-mcp folder (no need to restart Claude).`,
+    );
     this.name = "JellySessionError";
   }
 }
@@ -69,6 +71,8 @@ export interface JellyClientOptions {
   team: string;
   cookie: string;
   timezone: string;
+  /** Reads the latest saved login, so `npm run login` works without restarting the server. */
+  reloadCookie?: () => string | undefined;
   fetch?: typeof fetch;
   timeoutMs?: number;
 }
@@ -97,15 +101,27 @@ export class JellyClient {
   readonly baseUrl: string;
   readonly team: string;
   readonly timezone: string;
-  private readonly jar: CookieJar;
+  private jar: CookieJar;
+  /** The saved login the jar started from. */
+  private login: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly o: JellyClientOptions) {
     this.baseUrl = o.baseUrl;
     this.team = o.team;
     this.timezone = o.timezone;
+    this.login = o.cookie;
     this.jar = new CookieJar(o.cookie);
     this.fetchImpl = o.fetch ?? fetch;
+  }
+
+  /** Switches to a newer saved login if there is one (after `npm run login`). */
+  private useNewerLogin(): boolean {
+    const latest = this.o.reloadCookie?.();
+    if (!latest || latest === this.login) return false;
+    this.login = latest;
+    this.jar = new CookieJar(latest);
+    return true;
   }
 
   /** "/inbox" -> "/hack-club/inbox" */
@@ -123,6 +139,16 @@ export class JellyClient {
 
   /** GETs a page, following Jelly's own redirects (e.g. a numeric id to the conversation's slug). */
   async get(path: string, accept = "text/html"): Promise<{ body: string; url: string }> {
+    try {
+      return await this.getOnce(path, accept);
+    } catch (err) {
+      // Logged out: if a newer login was saved since we started, use it and try once more.
+      if (err instanceof JellySessionError && this.useNewerLogin()) return this.getOnce(path, accept);
+      throw err;
+    }
+  }
+
+  private async getOnce(path: string, accept: string): Promise<{ body: string; url: string }> {
     let url = this.absolute(path);
     for (let hop = 0; hop < 5; hop++) {
       const res = await this.request("GET", url, { accept });
@@ -144,6 +170,18 @@ export class JellyClient {
 
   /** Submits a form. Patch/delete go as POST with `_method` among the fields, as Rails forms do. */
   async submit(path: string, fields: Fields, o: SubmitOptions): Promise<SubmitResult> {
+    try {
+      return await this.submitOnce(path, fields, o);
+    } catch (err) {
+      // Never retried: the form's CSRF token belongs to the old login. Jelly turned it away, so nothing happened.
+      if (err instanceof JellySessionError && this.useNewerLogin()) {
+        throw new JellyError("Jelly had logged you out, so nothing was changed. Your new login is loaded now: try again.");
+      }
+      throw err;
+    }
+  }
+
+  private async submitOnce(path: string, fields: Fields, o: SubmitOptions): Promise<SubmitResult> {
     const url = this.absolute(path);
     const body = new URLSearchParams(fields);
     if (!body.has("authenticity_token")) body.set("authenticity_token", o.csrf);

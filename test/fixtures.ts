@@ -11,6 +11,8 @@ export interface ConversationOptions {
   bookmarked?: boolean;
   drafts?: boolean;
   snoozed?: boolean;
+  /** You aren't assigned, so the page offers "I got this". */
+  unassigned?: boolean;
 }
 
 export function conversationPage(o: ConversationOptions = {}): string {
@@ -21,7 +23,7 @@ export function conversationPage(o: ConversationOptions = {}): string {
 <script type="application/json" id="posthog-identity">{"user":{"id":"1","properties":{"email":"me@example.org","name":"Pat Lee"}},"account":{"properties":{"name":"Club","plan":"Royal Jelly"}},"team":{"properties":{"name":"Club"}}}</script>
 </head><body>
 <form class="edit_conversation" id="edit_conversation_555" action="${base}" method="post"><input type="hidden" name="_method" value="patch" />${token()}<textarea name="conversation[custom_subject]"></textarea><input type="submit" name="commit" value="Save" /></form>
-${buttonTo(`${base}/assignments/901`, "Unassign yourself from this conversation", "", "delete")}
+${o.unassigned ? `${buttonTo(`${base}/assignments?assignee_id=21`, "I got this")}${buttonTo(`${base}/assignments`, "Assign to yourself", '<input type="hidden" name="assignee_id" value="21" />')}` : buttonTo(`${base}/assignments/901`, "Unassign yourself from this conversation", "", "delete")}
 ${buttonTo(`${base}/assignments/902`, "Unassign Sam Rivera from this conversation", "", "delete")}
 ${buttonTo(`${base}/assignments`, "Assign this conversation to Alex Kim", '<input type="hidden" name="assignee_id" value="12" />')}
 ${buttonTo(`${base}/assignments`, "Assign this conversation to Alexandra Wu", '<input type="hidden" name="assignee_id" value="13" />')}
@@ -34,7 +36,9 @@ ${buttonTo(`${base}/conversation_mailboxes`, "Move to “Haven” mailbox", '<in
 <form class="button_to" method="post" action="${base}/conversation_mailboxes/30" data-turbo-confirm="Removing this conversation from “Haven” will unassign Sam. Continue?"><input type="hidden" name="_method" value="delete" /><button type="submit" title="A conversation must be in at least one mailbox"></button>${token()}</form>
 ${buttonTo(`${base}/mark_unread`, "Mark as unread (for me)")}
 ${o.bookmarked ? buttonTo(`${base}/bookmarks/4`, "Remove bookmark", "", "delete") : buttonTo(`${base}/bookmarks`, "Bookmark (for me)")}
-${o.snoozed ? buttonTo(`${base}/snooze`, "Unsnooze", "", "delete") : buttonTo(`${base}/snooze`, "Tomorrow 9 AM")}
+${buttonTo(`${base}/snooze`, "Tomorrow 9 AM")}
+${o.snoozed ? `${buttonTo(`${base}/unsnooze`, "Unsnooze")}<div class="flash">Conversation snoozed until <time datetime="2026-10-16T09:00:00Z">October 16</time>.</div>` : ""}
+<div class="thread-item ti-activity"><span>Pat Lee snoozed this until <time datetime="2026-09-01T09:00:00Z">September 1</time></span></div>
 ${buttonTo(`${base}/trash`, "Delete")}
 ${buttonTo(`${base}/unsubscribe`, "Unfollow")}
 <div class="thread-item ti-message opened inbound seen"><div id="ts_message_100"></div>
@@ -58,6 +62,28 @@ ${o.drafts ? `<turbo-frame id="message-form-x" src="${base}/messages/msg-ccc/edi
 </ul>
 <div id="ts_responder"><form class="button_to" method="post" action="/hack-club/drafts/reply?message%5Bconversation_id%5D=555&amp;message%5Bprevious_message_id%5D=101"><button data-turbo-frame="message-form-101" type="submit">Reply</button>${token()}</form></div>
 </body></html>`;
+}
+
+/** A draft's frame as someone not editing it sees it: preview plus "Edit draft". */
+export function draftPreview(o: { startedBy?: string; id?: string } = {}): string {
+  const id = o.id ?? "msg-ccc";
+  return `<html><body><turbo-frame id="message-form-101"><div class="sheet composer-sheet draft-locked">
+<div class="draft-provenance"><i class="fa-regular fa-file-pen"></i> <span class="text-light"> Draft${o.startedBy ? ` &middot; started by ${o.startedBy}` : ""} </span></div>
+<div class="draft-locked-field"><span class="form-label">To:</span> Jo &lt;jo@example.com&gt;</div>
+<div class="draft-locked-body"><div>Old draft text</div><div class="jelly-signature">Pat</div></div>
+<form class="button_to" method="post" action="/hack-club/drafts/${id}/claim"><button data-turbo-frame="message-form-101" type="submit">Edit draft</button>${token()}</form>
+</div></turbo-frame></body></html>`;
+}
+
+/** The same frame once you've pressed "Edit draft": the editor, with its Discard link. */
+export function draftEditor(id = "msg-ccc"): string {
+  return `<html><body><turbo-frame id="message-form-101">
+<form class="edit_message" action="/hack-club/conversations/help-with-venue/messages/${id}" method="post" data-controller="reply"
+  data-reply-draft-update-url-value="/hack-club/drafts/k2" data-reply-draft-release-url-value="/hack-club/drafts/k2/release" data-reply-draft-lock-token-value="lock-2">
+<input type="hidden" name="_method" value="patch" />${token()}<input type="hidden" name="message[html_body]" value="&lt;div&gt;Old draft text&lt;/div&gt;" />
+</form>
+<a class="button" data-turbo-method="delete" data-turbo-confirm="Are you sure?" data-turbo-frame="conversation_555" href="/hack-club/messages/${id}?discard=true&amp;draft_lock_token=lock-2">Discard</a>
+</turbo-frame></body></html>`;
 }
 
 /** The turbo-stream Jelly answers POST /drafts/reply with: the reply box, already a saved draft. */
