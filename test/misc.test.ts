@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cookieHeaderFrom } from "../src/cookie.js";
+import { cookieHeaderFrom } from "../src/login.js";
 import { stripQuoted } from "../src/format.js";
 import { composeHtmlBody, htmlToText, textToHtml } from "../src/html.js";
 import { redact, registerSecret } from "../src/redact.js";

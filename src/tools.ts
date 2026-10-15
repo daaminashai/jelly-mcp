@@ -35,7 +35,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
   const { config } = deps;
   const needJelly = (): Jelly => {
     if (!deps.jelly) {
-      throw new JellyError("This needs your Jelly login: run `npm run cookie` in the jelly-mcp folder, then restart Claude");
+      throw new JellyError("This needs your Jelly login: run `npm run login` in the jelly-mcp folder, then restart Claude");
     }
     return deps.jelly;
   };
@@ -67,7 +67,7 @@ export function registerTools(server: McpServer, deps: Deps): void {
           } catch (err) {
             lines.push(`Jelly: not connected (${errorMessage(err)})`);
           }
-        } else lines.push("Jelly: no login configured (run `npm run cookie` in jelly-mcp)");
+        } else lines.push("Jelly: no login configured (run `npm run login` in the jelly-mcp folder)");
         if (deps.marmalade) {
           try {
             const mailboxes = await deps.marmalade.listMailboxes();

@@ -30,7 +30,7 @@ export async function runChecks(): Promise<{ ok: boolean; lines: string[] }> {
       ok = false;
       lines.push(`✗ Jelly: ${errorMessage(err)}`);
     }
-  } else lines.push("- Jelly: no login yet. Run `npm run cookie` (reads, actions and replies need it).");
+  } else lines.push("- Jelly: no login yet. Run `npm run login` (reads, actions and replies need it).");
 
   if (config.marmalade) {
     try {

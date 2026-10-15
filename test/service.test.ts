@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { JellyClient, JellySendError, JellySessionError } from "../src/jelly/client.js";
 import { conversationRef, Jelly, snoozeTime } from "../src/jelly/service.js";
+import { checkJellyLogin } from "../src/login.js";
 import { composePage, conversationPage, fakeJelly, listPage, redirect, replyDraftStream, type Call } from "./fixtures.js";
 
 const CONV = "/hack-club/conversations/help-with-venue";
@@ -278,6 +279,23 @@ describe("session handling", () => {
     const page = await jelly.conversation("555");
     expect(page.slug).toBe("help-with-venue");
     expect(calls[1]!.headers.cookie).toBe("current_user_session_token=abc; _jelly_session=s2");
+  });
+});
+
+describe("checkJellyLogin", () => {
+  it("finds your team from where Jelly sends you", async () => {
+    const fake = fakeJelly({
+      "GET /": () => redirect("https://app.letsjelly.com/some-team/inbox"),
+      "GET /some-team/inbox": () => conversationPage(),
+    });
+    const { me, team } = await checkJellyLogin("current_user_session_token=abc", { fetch: fake.fetch });
+    expect(team).toBe("some-team");
+    expect(me.name).toBe("Pat Lee");
+  });
+
+  it("fails clearly when the login is dead", async () => {
+    const fake = fakeJelly({ "GET /": () => redirect("https://app.letsjelly.com/login") });
+    await expect(checkJellyLogin("current_user_session_token=old", { fetch: fake.fetch })).rejects.toThrow(/npm run login/);
   });
 });
 

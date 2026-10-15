@@ -17,7 +17,7 @@ const flag = (fallback: boolean) =>
   optionalString.transform((v) => (v === undefined ? fallback : v === "1" || v.toLowerCase() === "true"));
 
 const EnvSchema = z.object({
-  // Your Jelly login, from `npm run cookie`. Every action and most reads go through it.
+  // Your Jelly login, from `npm run setup` or `npm run login`. Every action and most reads go through it.
   JELLY_SESSION_COOKIE: optionalString,
   JELLY_BASE_URL: optionalString.transform((v) => (v ?? "https://app.letsjelly.com").replace(/\/+$/, "")),
   JELLY_TEAM: optionalString.transform((v) => v ?? "hack-club"),
@@ -58,7 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   if (!e.JELLY_SESSION_COOKIE && !e.MARMALADE_API_KEY) {
     throw new ConfigError(
-      `Nothing to connect with: set JELLY_SESSION_COOKIE (npm run cookie) and/or MARMALADE_API_KEY in ${ENV_FILE}`,
+      `Nothing to connect with: run npm run setup in the jelly-mcp folder (looked in ${ENV_FILE})`,
     );
   }
   return {

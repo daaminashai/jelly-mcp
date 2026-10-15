@@ -13,13 +13,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
-    "setup": "npm run build && node dist/setup.js",
-    "cookie": "tsx src/cookie.ts",
+    "setup": "tsc -p tsconfig.build.json && node dist/setup.js",
+    "login": "tsc -p tsconfig.build.json && node dist/setup.js --login",
     "check": "tsx src/check.ts",
+    "dev": "tsx src/index.ts",
+    "try": "npm run build --silent && tsx scripts/try.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "try": "npm run build --silent && tsx scripts/try.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

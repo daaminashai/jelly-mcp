@@ -1,16 +1,17 @@
-// `npm run setup`: builds, checks your logins, and adds this server to Claude
-// Code (user scope) and Claude Desktop, pointing at this folder.
+// `npm run setup`: walks you through logging in to Jelly (and optionally
+// Marmalade), then adds this server to Claude Code and Claude Desktop.
 //
-//   npm run setup -- --import ../pudding/.env   copy Marmalade/Jelly settings from another .env
+//   npm run login                               log in to Jelly again (when it expires)
 //   npm run setup -- --no-desktop | --no-code   skip one of the two apps
 //   npm run setup -- --uninstall                remove it from both
+//   npm run setup -- --import ../pudding/.env   copy the Jelly login and Marmalade key from another .env
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runChecks } from "./check.js";
 import { ENV_FILE, ROOT } from "./config.js";
 import { readEnvFile, setEnvValues } from "./envfile.js";
+import { ensureJellyLogin, ensureMarmalade, Prompt } from "./login.js";
 
 const NAME = "jelly";
 const ENTRY = path.join(ROOT, "dist", "index.js");
@@ -31,17 +32,20 @@ const say = (line = "") => process.stdout.write(`${line}\n`);
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const uninstall = args.includes("--uninstall");
   const doCode = !args.includes("--no-code");
   const doDesktop = !args.includes("--no-desktop");
 
-  if (uninstall) {
+  if (args.includes("--uninstall")) {
     if (doCode) say(removeFromClaudeCode());
     if (doDesktop) say(updateDesktopConfig(null));
     return;
   }
 
-  const importFrom = args[args.indexOf("--import") + 1];
+  if (!fs.existsSync(ENV_FILE)) {
+    fs.copyFileSync(path.join(ROOT, ".env.example"), ENV_FILE);
+    fs.chmodSync(ENV_FILE, 0o600);
+  }
+  const importFrom = args.includes("--import") ? args[args.indexOf("--import") + 1] : undefined;
   if (args.includes("--import")) {
     if (!importFrom || !fs.existsSync(importFrom)) throw new Error(`--import needs a .env file (got ${importFrom ?? "nothing"})`);
     const source = readEnvFile(path.resolve(importFrom));
@@ -51,17 +55,31 @@ async function main(): Promise<void> {
       if (value) copied[to] = value;
     }
     setEnvValues(ENV_FILE, copied);
-    say(`Copied ${Object.keys(copied).join(", ") || "nothing"} from ${importFrom} into .env (values not shown).`);
-  } else if (!fs.existsSync(ENV_FILE)) {
-    fs.copyFileSync(path.join(ROOT, ".env.example"), ENV_FILE);
-    fs.chmodSync(ENV_FILE, 0o600);
-    say(`Created ${ENV_FILE} from .env.example.`);
+    say(`Copied ${Object.keys(copied).join(", ") || "nothing"} from ${importFrom} (values not shown).`);
   }
 
-  say("Checking connections…");
-  const { ok, lines } = await runChecks();
-  for (const line of lines) say(`  ${line}`);
-  if (!ok) say("Fix the ✗ lines above (see the README); registering anyway so it works once they're fixed.");
+  const prompt = new Prompt();
+  try {
+    if (args.includes("--login")) {
+      const file = args.find((a) => !a.startsWith("--"));
+      const me = await ensureJellyLogin(prompt, { force: true, from: file ? fs.readFileSync(file, "utf8") : undefined });
+      if (me) say("Restart Claude (or reconnect the jelly server) to use the new login.");
+      process.exitCode = me ? 0 : 1;
+      return;
+    }
+
+    const me = await ensureJellyLogin(prompt);
+    await ensureMarmalade(prompt);
+    const env = readEnvFile(ENV_FILE);
+    if (!env.get("JELLY_SESSION_COOKIE") && !env.get("MARMALADE_API_KEY")) {
+      say("\nNothing to connect with yet, so Claude wasn't set up. Run npm run setup again when you have your Jelly login.");
+      process.exitCode = 1;
+      return;
+    }
+    if (!me) say("- Jelly: no login, so only the Marmalade tools will work. Run npm run login to add it.");
+  } finally {
+    prompt.close();
+  }
 
   if (!fs.existsSync(ENTRY)) throw new Error(`${ENTRY} is missing; run npm run build first`);
   if (!doCode && !doDesktop) return;
@@ -69,8 +87,8 @@ async function main(): Promise<void> {
   if (doCode) say(addToClaudeCode());
   if (doDesktop) say(updateDesktopConfig({ command: process.execPath, args: [ENTRY] }));
   say();
-  say(`Registered ${ENTRY}. If you move or delete this folder, run npm run setup again from the new one.`);
-  say("Restart Claude Desktop, or start a new Claude Code session, and the jelly tools will be there.");
+  say("Done! Restart Claude Desktop or start a new Claude Code session, then ask Claude about your Jelly inbox.");
+  say(`(Claude runs it from ${ROOT}; if you move this folder, run npm run setup again.)`);
 }
 
 // ---------- Claude Code ----------

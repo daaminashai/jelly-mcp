@@ -16,7 +16,7 @@ export class JellyError extends Error {
 /** The login is dead (logged out, expired, or rejected). */
 export class JellySessionError extends JellyError {
   constructor(message: string) {
-    super(`${message}. Your Jelly login has expired or was rejected: run \`npm run cookie\` in jelly-mcp to reconnect.`);
+    super(`${message}. Your Jelly login has expired or was rejected: run \`npm run login\` in the jelly-mcp folder to reconnect.`);
     this.name = "JellySessionError";
   }
 }
