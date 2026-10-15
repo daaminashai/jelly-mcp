@@ -29,6 +29,17 @@ const EnvSchema = z.object({
   // The mailbox list_mailbox_conversations uses when none is given, e.g. "haven".
   MARMALADE_MAILBOX: optionalString,
 
+  // The always-on service (npm run service): its port, and the token every request must carry.
+  JELLY_MCP_PORT: optionalString.transform((v, ctx) => {
+    const port = Number(v ?? 4646);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      ctx.addIssue({ code: "custom", message: "expected a port number" });
+      return z.NEVER;
+    }
+    return port;
+  }),
+  JELLY_MCP_TOKEN: optionalString,
+
   // 1: Claude can only read; every tool that changes Jelly is hidden.
   READ_ONLY: flag(false),
   // 1: Claude can draft replies and emails but not send them.
@@ -40,6 +51,7 @@ export interface Config {
   marmalade?: { baseUrl: string; apiKey: string; defaultMailbox?: string };
   readOnly: boolean;
   draftOnly: boolean;
+  service: { port: number; token?: string };
 }
 
 export class ConfigError extends Error {}
@@ -55,6 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   registerSecret(e.JELLY_SESSION_COOKIE);
   for (const part of (e.JELLY_SESSION_COOKIE ?? "").split(";")) registerSecret(part.split("=").slice(1).join("=").trim());
   registerSecret(e.MARMALADE_API_KEY);
+  registerSecret(e.JELLY_MCP_TOKEN);
 
   if (!e.JELLY_SESSION_COOKIE && !e.MARMALADE_API_KEY) {
     throw new ConfigError(
@@ -68,6 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       : undefined,
     readOnly: e.READ_ONLY,
     draftOnly: e.DRAFT_ONLY_NO_SEND,
+    service: { port: e.JELLY_MCP_PORT, token: e.JELLY_MCP_TOKEN },
   };
 }
 
